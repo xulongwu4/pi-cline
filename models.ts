@@ -1,4 +1,7 @@
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { Model, ModelCost, ProviderId } from "@earendil-works/pi-ai";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 export const API_BASE_URL = "https://api.cline.bot/api/v1";
 export const CATALOG_TIMEOUT_MS = 15_000;
@@ -112,12 +115,61 @@ function fallbackModel(
   };
 }
 
-export function getFallbackModelGroups(): ModelGroups {
+function cachePath(provider: "cline" | "cline-pass", agentDir: string): string {
+  return join(agentDir, provider, "models.json");
+}
+
+function loadCachedModels(
+  provider: "cline" | "cline-pass",
+  agentDir: string,
+): ClineModel[] | undefined {
+  try {
+    const models = JSON.parse(readFileSync(cachePath(provider, agentDir), "utf8")) as ClineModel[];
+    if (
+      !Array.isArray(models) ||
+      models.length === 0 ||
+      models.some(
+        (model) =>
+          typeof model?.id !== "string" ||
+          typeof model?.name !== "string" ||
+          model.provider !== provider ||
+          model.api !== "openai-completions" ||
+          !Array.isArray(model.input) ||
+          typeof model.contextWindow !== "number" ||
+          typeof model.maxTokens !== "number",
+      )
+    ) {
+      return undefined;
+    }
+    return models;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeCachedModels(
+  provider: "cline" | "cline-pass",
+  models: ClineModel[],
+  agentDir: string,
+): void {
+  try {
+    const path = cachePath(provider, agentDir);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(models, null, 2), { mode: 0o600 });
+    chmodSync(path, 0o600);
+  } catch {
+    // A cache write failure must not hide a valid live catalog.
+  }
+}
+
+export function getFallbackModelGroups(agentDir = getAgentDir()): ModelGroups {
   return {
-    cline: [fallbackModel("cline", "anthropic/claude-sonnet-4-6", "Claude Sonnet 4.6")],
-    clinePass: PASS_FALLBACK.map((seed) =>
-      fallbackModel("cline-pass", seed.id, seed.name, seed.cost),
-    ),
+    cline:
+      loadCachedModels("cline", agentDir) ??
+      [fallbackModel("cline", "anthropic/claude-sonnet-4-6", "Claude Sonnet 4.6")],
+    clinePass:
+      loadCachedModels("cline-pass", agentDir) ??
+      PASS_FALLBACK.map((seed) => fallbackModel("cline-pass", seed.id, seed.name, seed.cost)),
   };
 }
 
@@ -130,7 +182,11 @@ async function getJson<T>(fetcher: typeof fetch, url: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function loadModelGroups(fetcher: typeof fetch = fetch): Promise<ModelGroups> {
+export async function loadModelGroups(
+  fetcher: typeof fetch = fetch,
+  agentDir = getAgentDir(),
+): Promise<ModelGroups> {
+  const fallback = getFallbackModelGroups(agentDir);
   const [catalogResult, recommendedResult] = await Promise.allSettled([
     getJson<{ data?: CatalogEntry[] }>(fetcher, MODELS_URL),
     getJson<RecommendedPayload>(fetcher, RECOMMENDED_URL),
@@ -145,18 +201,13 @@ export async function loadModelGroups(fetcher: typeof fetch = fetch): Promise<Mo
   const recommended = recommendedResult.status === "fulfilled" ? recommendedResult.value : {};
   const freeIds = new Set((recommended.free ?? []).flatMap((entry) => (entry.id ? [entry.id] : [])));
 
-  let cline = catalog.map((entry) =>
-    modelFromCatalog(entry, "cline", freeIds.has(entry.id) ? { cost: ZERO_COST } : {}),
-  );
-  if (cline.length === 0) {
-    const entries = [...(recommended.recommended ?? []), ...(recommended.free ?? [])].filter(
-      (entry): entry is RecommendedEntry & { id: string } => Boolean(entry.id),
-    );
-    cline = entries.map((entry) => fallbackModel("cline", entry.id, entry.name ?? entry.id));
-  }
-  if (cline.length === 0) {
-    cline = [fallbackModel("cline", "anthropic/claude-sonnet-4-6", "Claude Sonnet 4.6")];
-  }
+  const cline =
+    catalog.length > 0
+      ? catalog.map((entry) =>
+          modelFromCatalog(entry, "cline", freeIds.has(entry.id) ? { cost: ZERO_COST } : {}),
+        )
+      : fallback.cline;
+  if (catalog.length > 0) writeCachedModels("cline", cline, agentDir);
 
   const bySlug = new Map(catalog.map((entry) => [entry.id.split("/").at(-1), entry]));
   const passEntries = [...(recommended.clinePass ?? []), ...(recommended.free ?? [])];
@@ -174,13 +225,16 @@ export async function loadModelGroups(fetcher: typeof fetch = fetch): Promise<Mo
       }),
     ).values(),
   ];
-  const resolvedSeeds = passSeeds.length > 0 ? passSeeds : PASS_FALLBACK;
-  const clinePass = resolvedSeeds.map((seed) => {
-    const match = bySlug.get(seed.id.split("/").at(-1));
-    return match
-      ? modelFromCatalog(match, "cline-pass", seed)
-      : fallbackModel("cline-pass", seed.id, seed.name, seed.cost);
-  });
+  const clinePass =
+    passSeeds.length > 0
+      ? passSeeds.map((seed) => {
+          const match = bySlug.get(seed.id.split("/").at(-1));
+          return match
+            ? modelFromCatalog(match, "cline-pass", seed)
+            : fallbackModel("cline-pass", seed.id, seed.name, seed.cost);
+        })
+      : fallback.clinePass;
+  if (passSeeds.length > 0) writeCachedModels("cline-pass", clinePass, agentDir);
 
   return { cline, clinePass };
 }

@@ -29,10 +29,11 @@ function registerModelGroups(pi: ProviderRegistrar, models: ModelGroups): void {
 export function registerClineProviders(
   pi: ProviderRegistrar,
   fetcher: typeof fetch = fetch,
+  agentDir?: string,
 ): Promise<void> {
-  registerModelGroups(pi, getFallbackModelGroups());
+  registerModelGroups(pi, getFallbackModelGroups(agentDir));
   return Promise.resolve()
-    .then(() => loadModelGroups(fetcher))
+    .then(() => loadModelGroups(fetcher, agentDir))
     .then((models) => registerModelGroups(pi, models));
 }
 

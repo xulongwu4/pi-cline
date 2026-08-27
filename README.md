@@ -11,7 +11,7 @@ Native [Pi](https://pi.dev) providers for Cline and ClinePass.
 
 The analogy is correct at the product level. The transport differs: both Cline products use the same OpenAI-compatible Chat Completions endpoint (`https://api.cline.bot/api/v1`), while OpenCode uses separate Zen/Go URLs and multiple API protocols.
 
-This extension follows the same Pi provider pattern, using Pi's built-in `openai-completions` transport and `CLINE_API_KEY` resolution. It registers documented fallback models immediately, then replaces them with Cline's public catalog and recommended ClinePass/free subset in the background.
+This extension follows the same Pi provider pattern, using Pi's built-in `openai-completions` transport and `CLINE_API_KEY` resolution. It registers the last successful catalogs immediately, then refreshes them from Cline in the background. Successful refreshes are saved with `0600` permissions at `$PI_CODING_AGENT_DIR/cline/models.json` and `$PI_CODING_AGENT_DIR/cline-pass/models.json` (default: `~/.pi/agent/...`). A missing or corrupt cache falls back to the bundled model lists.
 
 ## Install and use
 
