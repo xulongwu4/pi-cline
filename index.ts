@@ -71,13 +71,27 @@ export function registerClineProviders(
 
 export default function clineExtension(pi: ExtensionAPI): void {
   let pendingNotification: string | undefined;
-  let sessionCtx: { hasUI: boolean; ui?: { notify(msg: string, type?: string): void } } | undefined;
+  let sessionCtx:
+    | {
+        hasUI: boolean;
+        ui?: {
+          notify(msg: string, type?: string): void;
+          setWidget(
+            key: string,
+            lines: string[] | undefined,
+            options?: { placement?: "aboveEditor" | "belowEditor" },
+          ): void;
+        };
+      }
+    | undefined;
 
-  function notify(msg: string) {
-    if (sessionCtx?.hasUI && sessionCtx.ui?.notify) {
-      sessionCtx.ui.notify(msg, "info");
+  function showNotification(msg: string) {
+    if (sessionCtx?.hasUI && sessionCtx.ui) {
+      const brightCyanMsg = `\x1b[96m${msg}\x1b[0m`;
+      sessionCtx.ui.setWidget?.("pi-cline", [brightCyanMsg], { placement: "aboveEditor" });
+      sessionCtx.ui.notify?.(msg, "info");
     } else if (sessionCtx) {
-      console.log(msg);
+      console.log(`\x1b[96m${msg}\x1b[0m`);
     } else {
       pendingNotification = msg;
     }
@@ -86,16 +100,12 @@ export default function clineExtension(pi: ExtensionAPI): void {
   pi.on("session_start", (_event, ctx) => {
     sessionCtx = ctx;
     if (pendingNotification) {
-      if (ctx.hasUI && ctx.ui?.notify) {
-        ctx.ui.notify(pendingNotification, "info");
-      } else {
-        console.log(pendingNotification);
-      }
+      showNotification(pendingNotification);
       pendingNotification = undefined;
     }
   });
 
   void registerClineProviders(pi, fetch, undefined, (message) => {
-    notify(message);
+    showNotification(message);
   });
 }
