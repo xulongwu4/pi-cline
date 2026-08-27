@@ -11,7 +11,7 @@ Native [Pi](https://pi.dev) providers for Cline and ClinePass.
 
 The analogy is correct at the product level. The transport differs: both Cline products use the same OpenAI-compatible Chat Completions endpoint (`https://api.cline.bot/api/v1`), while OpenCode uses separate Zen/Go URLs and multiple API protocols.
 
-This extension follows the same Pi provider pattern, using Pi's built-in `openai-completions` transport and `CLINE_API_KEY` resolution. It loads Cline's public catalog and recommended ClinePass/free subset at startup, with documented static fallbacks.
+This extension follows the same Pi provider pattern, using Pi's built-in `openai-completions` transport and `CLINE_API_KEY` resolution. It registers documented fallback models immediately, then replaces them with Cline's public catalog and recommended ClinePass/free subset in the background.
 
 ## Install and use
 

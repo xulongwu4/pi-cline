@@ -1,11 +1,13 @@
 import type { Model, ModelCost, ProviderId } from "@earendil-works/pi-ai";
 
 export const API_BASE_URL = "https://api.cline.bot/api/v1";
+export const CATALOG_TIMEOUT_MS = 15_000;
 const MODELS_URL = `${API_BASE_URL}/ai/cline/models`;
 const RECOMMENDED_URL = `${API_BASE_URL}/ai/cline/recommended-models`;
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
 type ClineModel = Model<"openai-completions">;
+export type ModelGroups = { cline: ClineModel[]; clinePass: ClineModel[] };
 type CatalogEntry = {
   id?: string;
   name?: string;
@@ -110,19 +112,25 @@ function fallbackModel(
   };
 }
 
+export function getFallbackModelGroups(): ModelGroups {
+  return {
+    cline: [fallbackModel("cline", "anthropic/claude-sonnet-4-6", "Claude Sonnet 4.6")],
+    clinePass: PASS_FALLBACK.map((seed) =>
+      fallbackModel("cline-pass", seed.id, seed.name, seed.cost),
+    ),
+  };
+}
+
 async function getJson<T>(fetcher: typeof fetch, url: string): Promise<T> {
   const response = await fetcher(url, {
     headers: { Accept: "application/json" },
-    signal: AbortSignal.timeout(5_000),
+    signal: AbortSignal.timeout(CATALOG_TIMEOUT_MS),
   });
   if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
   return (await response.json()) as T;
 }
 
-export async function loadModelGroups(fetcher: typeof fetch = fetch): Promise<{
-  cline: ClineModel[];
-  clinePass: ClineModel[];
-}> {
+export async function loadModelGroups(fetcher: typeof fetch = fetch): Promise<ModelGroups> {
   const [catalogResult, recommendedResult] = await Promise.allSettled([
     getJson<{ data?: CatalogEntry[] }>(fetcher, MODELS_URL),
     getJson<RecommendedPayload>(fetcher, RECOMMENDED_URL),

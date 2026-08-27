@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ProviderConfig } from "@earendil-works/pi-coding-agent";
 import { registerClineProviders } from "./index.ts";
-import { loadModelGroups } from "./models.ts";
+import { CATALOG_TIMEOUT_MS, loadModelGroups } from "./models.ts";
 
 const catalog = {
   data: [
@@ -35,6 +35,10 @@ function fakeFetch(input: string | URL | Request): Promise<Response> {
   return Promise.resolve(Response.json(body));
 }
 
+test("allows enough time for the live Cline catalog", () => {
+  assert.ok(CATALOG_TIMEOUT_MS >= 10_000);
+});
+
 test("maps the Cline catalog and ClinePass subset", async () => {
   const models = await loadModelGroups(fakeFetch);
   assert.equal(models.cline.length, 2);
@@ -46,16 +50,23 @@ test("maps the Cline catalog and ClinePass subset", async () => {
   assert.equal(models.clinePass[0].contextWindow, 1_000_000);
 });
 
-test("registers cline and cline-pass with shared API-key transport", async () => {
+test("registers fallbacks before refreshing models in the background", async () => {
   const providers: Array<{ name: string; config: ProviderConfig }> = [];
-  await registerClineProviders(
+  const discovery = registerClineProviders(
     { registerProvider: (name, config) => void providers.push({ name, config }) },
     fakeFetch,
   );
+
   assert.deepEqual(providers.map((provider) => provider.name), ["cline", "cline-pass"]);
-  assert.ok(providers.every((provider) => provider.config.apiKey === "$CLINE_API_KEY"));
-  assert.ok(providers.every((provider) => provider.config.api === "openai-completions"));
-  assert.ok(providers.every((provider) => (provider.config.models?.length ?? 0) > 0));
+  assert.equal(providers[0].config.models?.length, 1);
+  assert.equal(providers[1].config.models?.length, 13);
+
+  await discovery;
+  const refreshed = providers.slice(-2);
+  assert.deepEqual(refreshed.map((provider) => provider.name), ["cline", "cline-pass"]);
+  assert.ok(refreshed.every((provider) => provider.config.apiKey === "$CLINE_API_KEY"));
+  assert.ok(refreshed.every((provider) => provider.config.api === "openai-completions"));
+  assert.ok(refreshed.every((provider) => (provider.config.models?.length ?? 0) > 0));
 });
 
 test("keeps both providers usable when discovery fails", async () => {
