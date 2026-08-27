@@ -89,7 +89,6 @@ export default function clineExtension(pi: ExtensionAPI): void {
     if (sessionCtx?.hasUI && sessionCtx.ui) {
       const brightCyanMsg = `\x1b[96m${msg}\x1b[0m`;
       sessionCtx.ui.setWidget?.("pi-cline", [brightCyanMsg], { placement: "aboveEditor" });
-      sessionCtx.ui.notify?.(msg, "info");
     } else if (sessionCtx) {
       console.log(`\x1b[96m${msg}\x1b[0m`);
     } else {
