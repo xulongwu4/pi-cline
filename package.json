@@ -1,0 +1,25 @@
+{
+  "name": "pi-cline",
+  "version": "0.1.0",
+  "description": "Cline and ClinePass providers for Pi",
+  "type": "module",
+  "keywords": ["pi-package", "pi-extension", "cline", "clinepass"],
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.84.3",
+    "@earendil-works/pi-coding-agent": "^0.84.3",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  },
+  "files": ["index.ts", "models.ts", "README.md"]
+}
