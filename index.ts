@@ -1,4 +1,10 @@
-import type { ExtensionAPI, ProviderConfig } from "@earendil-works/pi-coding-agent";
+import {
+  createProvider,
+  envApiKeyAuth,
+  openAICompletionsApi,
+  type Provider,
+} from "@earendil-works/pi-ai/compat";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   API_BASE_URL,
   getFallbackModelGroups,
@@ -7,23 +13,30 @@ import {
 } from "./models.ts";
 
 type ProviderRegistrar = {
-  registerProvider(name: string, config: ProviderConfig): void;
+  registerProvider(provider: Provider): void;
 };
 
 function registerModelGroups(pi: ProviderRegistrar, models: ModelGroups): void {
-  const common = {
-    baseUrl: API_BASE_URL,
-    apiKey: "$CLINE_API_KEY",
-    authHeader: true,
-    api: "openai-completions" as const,
-  };
-
-  pi.registerProvider("cline", { ...common, name: "Cline", models: models.cline });
-  pi.registerProvider("cline-pass", {
-    ...common,
-    name: "ClinePass",
-    models: models.clinePass,
-  });
+  pi.registerProvider(
+    createProvider({
+      id: "cline",
+      name: "Cline",
+      baseUrl: API_BASE_URL,
+      auth: { apiKey: envApiKeyAuth("Cline API key", ["CLINE_API_KEY"]) },
+      models: models.cline,
+      api: openAICompletionsApi(),
+    }),
+  );
+  pi.registerProvider(
+    createProvider({
+      id: "cline-pass",
+      name: "ClinePass",
+      baseUrl: API_BASE_URL,
+      auth: { apiKey: envApiKeyAuth("Cline API key", ["CLINE_API_KEY"]) },
+      models: models.clinePass,
+      api: openAICompletionsApi(),
+    }),
+  );
 }
 
 export function registerClineProviders(

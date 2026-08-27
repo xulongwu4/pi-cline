@@ -3,7 +3,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { ProviderConfig } from "@earendil-works/pi-coding-agent";
+import type { Provider } from "@earendil-works/pi-ai";
+import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { registerClineProviders } from "./index.ts";
 import { CATALOG_TIMEOUT_MS, getFallbackModelGroups, loadModelGroups } from "./models.ts";
 
@@ -61,23 +62,57 @@ test("maps the Cline catalog and ClinePass subset", async () => {
 test("registers fallbacks before refreshing models in the background", async () => {
   const agentDir = mkdtempSync(join(tmpdir(), "pi-cline-register-"));
   try {
-    const providers: Array<{ name: string; config: ProviderConfig }> = [];
+    const providers: Provider[] = [];
     const discovery = registerClineProviders(
-      { registerProvider: (name, config) => void providers.push({ name, config }) },
+      { registerProvider: (provider) => void providers.push(provider) },
       fakeFetch,
       agentDir,
     );
 
-    assert.deepEqual(providers.map((provider) => provider.name), ["cline", "cline-pass"]);
-    assert.equal(providers[0].config.models?.length, 1);
-    assert.equal(providers[1].config.models?.length, 13);
+    assert.deepEqual(providers.map((provider) => provider.id), ["cline", "cline-pass"]);
+    assert.equal(providers[0].getModels().length, 1);
+    assert.equal(providers[1].getModels().length, 13);
 
     await discovery;
     const refreshed = providers.slice(-2);
-    assert.deepEqual(refreshed.map((provider) => provider.name), ["cline", "cline-pass"]);
-    assert.ok(refreshed.every((provider) => provider.config.apiKey === "$CLINE_API_KEY"));
-    assert.ok(refreshed.every((provider) => provider.config.api === "openai-completions"));
-    assert.ok(refreshed.every((provider) => (provider.config.models?.length ?? 0) > 0));
+    assert.deepEqual(refreshed.map((provider) => provider.id), ["cline", "cline-pass"]);
+    assert.ok(refreshed.every((provider) => provider.getModels().length > 0));
+  } finally {
+    rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("allows baseUrl overwrite from models.json for cline and cline-pass", async () => {
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-cline-override-"));
+  try {
+    const modelsJsonPath = join(agentDir, "models.json");
+    writeFileSync(
+      modelsJsonPath,
+      JSON.stringify({
+        providers: {
+          cline: { baseUrl: "http://localhost:8789" },
+          "cline-pass": { baseUrl: "http://localhost:8789" },
+        },
+      }),
+    );
+
+    const runtime = await ModelRuntime.create({
+      modelsPath: modelsJsonPath,
+      authPath: join(agentDir, "auth.json"),
+    });
+    const registry = new ModelRegistry(runtime);
+
+    await registerClineProviders(registry, fakeFetch, agentDir);
+
+    const clineProvider = runtime.getProvider("cline");
+    const clinePassProvider = runtime.getProvider("cline-pass");
+    const clineModels = runtime.getModels("cline");
+    const clinePassModels = runtime.getModels("cline-pass");
+
+    assert.equal(clineProvider?.baseUrl, "http://localhost:8789");
+    assert.equal(clinePassProvider?.baseUrl, "http://localhost:8789");
+    assert.equal(clineModels[0]?.baseUrl, "http://localhost:8789");
+    assert.equal(clinePassModels[0]?.baseUrl, "http://localhost:8789");
   } finally {
     rmSync(agentDir, { recursive: true, force: true });
   }
