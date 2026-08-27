@@ -63,10 +63,12 @@ test("registers cache immediately and updates on-disk cache in the background wi
   const agentDir = mkdtempSync(join(tmpdir(), "pi-cline-register-"));
   try {
     const providers: Provider[] = [];
+    const notifications: string[] = [];
     const backgroundRefresh = registerClineProviders(
       { registerProvider: (provider) => void providers.push(provider) },
       fakeFetch,
       agentDir,
+      (msg) => notifications.push(msg),
     );
 
     // Initial registration happens synchronously on startup
@@ -75,15 +77,32 @@ test("registers cache immediately and updates on-disk cache in the background wi
     assert.equal(providers[1].getModels().length, 13);
 
     // Wait for background disk cache update
-    await backgroundRefresh;
+    const updated = await backgroundRefresh;
+    assert.equal(updated, true);
 
     // Session providers are not re-registered or mutated
     assert.equal(providers.length, 2);
+
+    // User is notified to reload when the catalog differs from the initial models
+    assert.equal(notifications.length, 1);
+    assert.ok(notifications[0].includes("Run /reload"));
 
     // Disk cache is updated for subsequent sessions
     const cached = getFallbackModelGroups(agentDir);
     assert.equal(cached.cline.length, 2);
     assert.equal(cached.clinePass.length, 2);
+
+    // Subsequent start with matching cache does not notify
+    const secondNotifications: string[] = [];
+    const secondRefresh = registerClineProviders(
+      { registerProvider: () => {} },
+      fakeFetch,
+      agentDir,
+      (msg) => secondNotifications.push(msg),
+    );
+    const secondUpdated = await secondRefresh;
+    assert.equal(secondUpdated, false);
+    assert.equal(secondNotifications.length, 0);
   } finally {
     rmSync(agentDir, { recursive: true, force: true });
   }

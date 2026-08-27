@@ -8,6 +8,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   API_BASE_URL,
   getFallbackModelGroups,
+  modelGroupsEqual,
   refreshModelCatalog,
   type ModelGroups,
 } from "./models.ts";
@@ -43,15 +44,48 @@ export function registerClineProviders(
   pi: ProviderRegistrar,
   fetcher: typeof fetch = fetch,
   agentDir?: string,
-): Promise<void> {
-  registerModelGroups(pi, getFallbackModelGroups(agentDir));
+  onCatalogUpdated?: (message: string) => void,
+): Promise<boolean> {
+  const initial = getFallbackModelGroups(agentDir);
+  registerModelGroups(pi, initial);
+
   return refreshModelCatalog(fetcher, agentDir)
-    .then(() => undefined)
+    .then((refreshed) => {
+      if (refreshed && !modelGroupsEqual(initial, refreshed)) {
+        const message =
+          "[pi-cline] Model catalog updated in background. Run /reload to load the full list of models.";
+        if (onCatalogUpdated) {
+          onCatalogUpdated(message);
+        } else {
+          console.log(message);
+        }
+        return true;
+      }
+      return false;
+    })
     .catch((error) => {
       console.warn(`[pi-cline] Model discovery failed: ${String(error)}`);
+      return false;
     });
 }
 
 export default function clineExtension(pi: ExtensionAPI): void {
-  void registerClineProviders(pi);
+  let notifyTarget: ((msg: string) => void) | undefined;
+  pi.on("session_start", (_event, ctx) => {
+    notifyTarget = (msg: string) => {
+      if (ctx.hasUI && ctx.ui?.notify) {
+        ctx.ui.notify(msg, "info");
+      } else {
+        console.log(msg);
+      }
+    };
+  });
+
+  void registerClineProviders(pi, fetch, undefined, (message) => {
+    if (notifyTarget) {
+      notifyTarget(message);
+    } else {
+      console.log(message);
+    }
+  });
 }

@@ -243,6 +243,19 @@ export async function refreshModelCatalog(
   }
 }
 
+export function modelGroupsEqual(a: ModelGroups, b: ModelGroups): boolean {
+  if (a.cline.length !== b.cline.length || a.clinePass.length !== b.clinePass.length) {
+    return false;
+  }
+  const aClineIds = a.cline.map((m) => m.id).sort();
+  const bClineIds = b.cline.map((m) => m.id).sort();
+  if (aClineIds.some((id, i) => id !== bClineIds[i])) return false;
+
+  const aPassIds = a.clinePass.map((m) => m.id).sort();
+  const bPassIds = b.clinePass.map((m) => m.id).sort();
+  return !aPassIds.some((id, i) => id !== bPassIds[i]);
+}
+
 export async function loadModelGroups(
   fetcher: typeof fetch = fetch,
   agentDir = getAgentDir(),
