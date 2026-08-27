@@ -70,22 +70,32 @@ export function registerClineProviders(
 }
 
 export default function clineExtension(pi: ExtensionAPI): void {
-  let notifyTarget: ((msg: string) => void) | undefined;
+  let pendingNotification: string | undefined;
+  let sessionCtx: { hasUI: boolean; ui?: { notify(msg: string, type?: string): void } } | undefined;
+
+  function notify(msg: string) {
+    if (sessionCtx?.hasUI && sessionCtx.ui?.notify) {
+      sessionCtx.ui.notify(msg, "info");
+    } else if (sessionCtx) {
+      console.log(msg);
+    } else {
+      pendingNotification = msg;
+    }
+  }
+
   pi.on("session_start", (_event, ctx) => {
-    notifyTarget = (msg: string) => {
+    sessionCtx = ctx;
+    if (pendingNotification) {
       if (ctx.hasUI && ctx.ui?.notify) {
-        ctx.ui.notify(msg, "info");
+        ctx.ui.notify(pendingNotification, "info");
       } else {
-        console.log(msg);
+        console.log(pendingNotification);
       }
-    };
+      pendingNotification = undefined;
+    }
   });
 
   void registerClineProviders(pi, fetch, undefined, (message) => {
-    if (notifyTarget) {
-      notifyTarget(message);
-    } else {
-      console.log(message);
-    }
+    notify(message);
   });
 }
