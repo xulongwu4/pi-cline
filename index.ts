@@ -50,8 +50,10 @@ export function registerClineProviders(
     .then((models) => registerModelGroups(pi, models));
 }
 
-export default function clineExtension(pi: ExtensionAPI): void {
-  void registerClineProviders(pi).catch((error) => {
+export default async function clineExtension(pi: ExtensionAPI): Promise<void> {
+  try {
+    await registerClineProviders(pi);
+  } catch (error) {
     console.warn(`[pi-cline] Model discovery failed: ${String(error)}`);
-  });
+  }
 }
