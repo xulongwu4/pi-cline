@@ -39,8 +39,8 @@ function fakeFetch(input: string | URL | Request): Promise<Response> {
   return Promise.resolve(Response.json(body));
 }
 
-test("allows enough time for the live Cline catalog", () => {
-  assert.ok(CATALOG_TIMEOUT_MS >= 10_000);
+test("allows 5 seconds for the live Cline catalog", () => {
+  assert.equal(CATALOG_TIMEOUT_MS, 5_000);
 });
 
 test("maps the Cline catalog and ClinePass subset", async () => {
@@ -59,24 +59,31 @@ test("maps the Cline catalog and ClinePass subset", async () => {
   }
 });
 
-test("registers fallbacks before refreshing models in the background", async () => {
+test("registers cache immediately and updates on-disk cache in the background without mutating session models", async () => {
   const agentDir = mkdtempSync(join(tmpdir(), "pi-cline-register-"));
   try {
     const providers: Provider[] = [];
-    const discovery = registerClineProviders(
+    const backgroundRefresh = registerClineProviders(
       { registerProvider: (provider) => void providers.push(provider) },
       fakeFetch,
       agentDir,
     );
 
+    // Initial registration happens synchronously on startup
     assert.deepEqual(providers.map((provider) => provider.id), ["cline", "cline-pass"]);
     assert.equal(providers[0].getModels().length, 1);
     assert.equal(providers[1].getModels().length, 13);
 
-    await discovery;
-    const refreshed = providers.slice(-2);
-    assert.deepEqual(refreshed.map((provider) => provider.id), ["cline", "cline-pass"]);
-    assert.ok(refreshed.every((provider) => provider.getModels().length > 0));
+    // Wait for background disk cache update
+    await backgroundRefresh;
+
+    // Session providers are not re-registered or mutated
+    assert.equal(providers.length, 2);
+
+    // Disk cache is updated for subsequent sessions
+    const cached = getFallbackModelGroups(agentDir);
+    assert.equal(cached.cline.length, 2);
+    assert.equal(cached.clinePass.length, 2);
   } finally {
     rmSync(agentDir, { recursive: true, force: true });
   }

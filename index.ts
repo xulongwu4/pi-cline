@@ -8,7 +8,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   API_BASE_URL,
   getFallbackModelGroups,
-  loadModelGroups,
+  refreshModelCatalog,
   type ModelGroups,
 } from "./models.ts";
 
@@ -45,15 +45,13 @@ export function registerClineProviders(
   agentDir?: string,
 ): Promise<void> {
   registerModelGroups(pi, getFallbackModelGroups(agentDir));
-  return Promise.resolve()
-    .then(() => loadModelGroups(fetcher, agentDir))
-    .then((models) => registerModelGroups(pi, models));
+  return refreshModelCatalog(fetcher, agentDir)
+    .then(() => undefined)
+    .catch((error) => {
+      console.warn(`[pi-cline] Model discovery failed: ${String(error)}`);
+    });
 }
 
-export default async function clineExtension(pi: ExtensionAPI): Promise<void> {
-  try {
-    await registerClineProviders(pi);
-  } catch (error) {
-    console.warn(`[pi-cline] Model discovery failed: ${String(error)}`);
-  }
+export default function clineExtension(pi: ExtensionAPI): void {
+  void registerClineProviders(pi);
 }

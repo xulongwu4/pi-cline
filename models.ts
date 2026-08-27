@@ -4,7 +4,7 @@ import type { Model, ModelCost, ProviderId } from "@earendil-works/pi-ai";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 export const API_BASE_URL = "https://api.cline.bot/api/v1";
-export const CATALOG_TIMEOUT_MS = 15_000;
+export const CATALOG_TIMEOUT_MS = 5_000;
 const MODELS_URL = `${API_BASE_URL}/ai/cline/models`;
 const RECOMMENDED_URL = `${API_BASE_URL}/ai/cline/recommended-models`;
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -182,59 +182,71 @@ async function getJson<T>(fetcher: typeof fetch, url: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+export async function refreshModelCatalog(
+  fetcher: typeof fetch = fetch,
+  agentDir = getAgentDir(),
+): Promise<ModelGroups | undefined> {
+  const fallback = getFallbackModelGroups(agentDir);
+  try {
+    const [catalogResult, recommendedResult] = await Promise.allSettled([
+      getJson<{ data?: CatalogEntry[] }>(fetcher, MODELS_URL),
+      getJson<RecommendedPayload>(fetcher, RECOMMENDED_URL),
+    ]);
+    const catalog =
+      catalogResult.status === "fulfilled"
+        ? (catalogResult.value.data ?? []).filter(
+            (entry): entry is CatalogEntry & { id: string } =>
+              Boolean(entry.id) && (entry.supported_parameters ?? []).includes("tools"),
+          )
+        : [];
+    const recommended = recommendedResult.status === "fulfilled" ? recommendedResult.value : {};
+    const freeIds = new Set((recommended.free ?? []).flatMap((entry) => (entry.id ? [entry.id] : [])));
+
+    const cline =
+      catalog.length > 0
+        ? catalog.map((entry) =>
+            modelFromCatalog(entry, "cline", freeIds.has(entry.id) ? { cost: ZERO_COST } : {}),
+          )
+        : fallback.cline;
+    if (catalog.length > 0) writeCachedModels("cline", cline, agentDir);
+
+    const bySlug = new Map(catalog.map((entry) => [entry.id.split("/").at(-1), entry]));
+    const passEntries = [...(recommended.clinePass ?? []), ...(recommended.free ?? [])];
+    const passSeeds = [
+      ...new Map(
+        passEntries.flatMap((entry) => {
+          if (!entry.id) return [];
+          const fallback = PASS_FALLBACK.find((model) => model.id === entry.id);
+          const seed: PassSeed = {
+            id: entry.id,
+            name: entry.name ?? fallback?.name ?? entry.id,
+            cost: fallback?.cost ?? ZERO_COST,
+          };
+          return [[entry.id, seed] as const];
+        }),
+      ).values(),
+    ];
+    const clinePass =
+      passSeeds.length > 0
+        ? passSeeds.map((seed) => {
+            const match = bySlug.get(seed.id.split("/").at(-1));
+            return match
+              ? modelFromCatalog(match, "cline-pass", seed)
+              : fallbackModel("cline-pass", seed.id, seed.name, seed.cost);
+          })
+        : fallback.clinePass;
+    if (passSeeds.length > 0) writeCachedModels("cline-pass", clinePass, agentDir);
+
+    return { cline, clinePass };
+  } catch {
+    return undefined;
+  }
+}
+
 export async function loadModelGroups(
   fetcher: typeof fetch = fetch,
   agentDir = getAgentDir(),
 ): Promise<ModelGroups> {
-  const fallback = getFallbackModelGroups(agentDir);
-  const [catalogResult, recommendedResult] = await Promise.allSettled([
-    getJson<{ data?: CatalogEntry[] }>(fetcher, MODELS_URL),
-    getJson<RecommendedPayload>(fetcher, RECOMMENDED_URL),
-  ]);
-  const catalog =
-    catalogResult.status === "fulfilled"
-      ? (catalogResult.value.data ?? []).filter(
-          (entry): entry is CatalogEntry & { id: string } =>
-            Boolean(entry.id) && (entry.supported_parameters ?? []).includes("tools"),
-        )
-      : [];
-  const recommended = recommendedResult.status === "fulfilled" ? recommendedResult.value : {};
-  const freeIds = new Set((recommended.free ?? []).flatMap((entry) => (entry.id ? [entry.id] : [])));
-
-  const cline =
-    catalog.length > 0
-      ? catalog.map((entry) =>
-          modelFromCatalog(entry, "cline", freeIds.has(entry.id) ? { cost: ZERO_COST } : {}),
-        )
-      : fallback.cline;
-  if (catalog.length > 0) writeCachedModels("cline", cline, agentDir);
-
-  const bySlug = new Map(catalog.map((entry) => [entry.id.split("/").at(-1), entry]));
-  const passEntries = [...(recommended.clinePass ?? []), ...(recommended.free ?? [])];
-  const passSeeds = [
-    ...new Map(
-      passEntries.flatMap((entry) => {
-        if (!entry.id) return [];
-        const fallback = PASS_FALLBACK.find((model) => model.id === entry.id);
-        const seed: PassSeed = {
-          id: entry.id,
-          name: entry.name ?? fallback?.name ?? entry.id,
-          cost: fallback?.cost ?? ZERO_COST,
-        };
-        return [[entry.id, seed] as const];
-      }),
-    ).values(),
-  ];
-  const clinePass =
-    passSeeds.length > 0
-      ? passSeeds.map((seed) => {
-          const match = bySlug.get(seed.id.split("/").at(-1));
-          return match
-            ? modelFromCatalog(match, "cline-pass", seed)
-            : fallbackModel("cline-pass", seed.id, seed.name, seed.cost);
-        })
-      : fallback.clinePass;
-  if (passSeeds.length > 0) writeCachedModels("cline-pass", clinePass, agentDir);
-
-  return { cline, clinePass };
+  const updated = await refreshModelCatalog(fetcher, agentDir);
+  return updated ?? getFallbackModelGroups(agentDir);
 }
