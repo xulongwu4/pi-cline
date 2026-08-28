@@ -1,19 +1,12 @@
 # pi-cline
 
-Native [Pi](https://pi.dev) providers for Cline and ClinePass.
+Native [Pi](https://pi.dev) provider for ClinePass.
 
-## Verified mapping
-
-| Pi provider | Cline product | OpenCode analogue | Billing/model set |
-|---|---|---|---|
-| `cline` | Cline API | `opencode` (Zen) | Usage-billed broad catalog |
-| `cline-pass` | ClinePass | `opencode-go` | Flat subscription, curated models |
-
-The analogy is correct at the product level. The transport differs: both Cline products use the same OpenAI-compatible Chat Completions endpoint (`https://api.cline.bot/api/v1`), while OpenCode uses separate Zen/Go URLs and multiple API protocols.
-
-This extension follows the same Pi provider pattern, using Pi's built-in `openai-completions` transport and `CLINE_API_KEY` resolution. It registers the last successful catalogs immediately, then refreshes them from Cline in the background. Successful refreshes are saved with `0600` permissions at `$PI_CODING_AGENT_DIR/cline/models.json` and `$PI_CODING_AGENT_DIR/cline-pass/models.json` (default: `~/.pi/agent/...`). A missing or corrupt cache falls back to the bundled model lists.
+The extension registers only `cline-pass`, using Pi's built-in `openai-completions` transport and `CLINE_API_KEY` resolution. It loads the last successful catalog immediately, refreshes it from Cline without blocking startup, and caches successful refreshes with `0600` permissions at `$PI_CODING_AGENT_DIR/cline-pass/models.json` (default: `~/.pi/agent/cline-pass/models.json`). A missing or corrupt cache falls back to the bundled ClinePass model list.
 
 ## Install and use
+
+**Upgrade note:** the `cline` provider was removed; use `cline-pass` instead.
 
 Create a key at [app.cline.bot → Settings → API Keys](https://app.cline.bot), then:
 
@@ -23,12 +16,11 @@ export CLINE_API_KEY="your-key"
 pi
 ```
 
-Alternatively, run `/login` and choose **Cline** or **ClinePass**; Pi stores the entered API key.
+Alternatively, run `/login` and choose **ClinePass**. Pi stores the entered API key.
 
 Select models with `/model`, or:
 
 ```sh
-pi --provider cline --model <model-id>
 pi --provider cline-pass --model cline-pass/glm-5.3
 ```
 
@@ -42,7 +34,6 @@ npm run typecheck
 
 ## Sources
 
-- [Cline API overview](https://github.com/cline/cline/blob/main/docs/api/overview.mdx)
 - [Cline API authentication](https://github.com/cline/cline/blob/main/docs/api/authentication.mdx)
 - [ClinePass product and model list](https://github.com/cline/cline/blob/main/docs/getting-started/clinepass.mdx)
 - [Cline recommended-provider catalog](https://github.com/cline/cline/blob/main/sdk/packages/llms/src/catalog/catalog-cline-recommended.ts)

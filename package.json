@@ -1,7 +1,7 @@
 {
   "name": "pi-cline",
   "version": "0.1.0",
-  "description": "Cline and ClinePass providers for Pi",
+  "description": "ClinePass provider for Pi",
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "cline", "clinepass"],
   "pi": {
