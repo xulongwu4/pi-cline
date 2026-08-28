@@ -39,8 +39,8 @@ function fakeFetch(input: string | URL | Request): Promise<Response> {
   return Promise.resolve(Response.json(body));
 }
 
-test("allows 5 seconds for the live Cline catalog", () => {
-  assert.equal(CATALOG_TIMEOUT_MS, 5_000);
+test("allows 15 seconds for the live Cline catalog", () => {
+  assert.equal(CATALOG_TIMEOUT_MS, 15_000);
 });
 
 test("maps the Cline catalog and ClinePass subset", async () => {

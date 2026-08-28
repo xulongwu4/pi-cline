@@ -4,7 +4,7 @@ import type { Model, ModelCost, ProviderId } from "@earendil-works/pi-ai";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 export const API_BASE_URL = "https://api.cline.bot/api/v1";
-export const CATALOG_TIMEOUT_MS = 5_000;
+export const CATALOG_TIMEOUT_MS = 15_000;
 const MODELS_URL = `${API_BASE_URL}/ai/cline/models`;
 const RECOMMENDED_URL = `${API_BASE_URL}/ai/cline/recommended-models`;
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
