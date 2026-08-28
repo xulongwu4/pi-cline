@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { Provider } from "@earendil-works/pi-ai";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { registerClineProviders } from "./index.ts";
+import { createClinePassProvider, createClineProvider, registerClineProviders } from "./index.ts";
 import { CATALOG_TIMEOUT_MS, getFallbackModelGroups, loadModelGroups } from "./models.ts";
 
 const catalog = {
@@ -59,50 +59,38 @@ test("maps the Cline catalog and ClinePass subset", async () => {
   }
 });
 
-test("registers cache immediately and updates on-disk cache in the background without mutating session models", async () => {
+test("registers initial models and refreshes dynamically via fetchModels", async () => {
   const agentDir = mkdtempSync(join(tmpdir(), "pi-cline-register-"));
   try {
-    const providers: Provider[] = [];
-    const notifications: string[] = [];
-    const backgroundRefresh = registerClineProviders(
-      { registerProvider: (provider) => void providers.push(provider) },
-      fakeFetch,
-      agentDir,
-      (msg) => notifications.push(msg),
-    );
+    const cline = createClineProvider(fakeFetch, agentDir);
+    const clinePass = createClinePassProvider(fakeFetch, agentDir);
 
-    // Initial registration happens synchronously on startup
-    assert.deepEqual(providers.map((provider) => provider.id), ["cline", "cline-pass"]);
-    assert.equal(providers[0].getModels().length, 1);
-    assert.equal(providers[1].getModels().length, 13);
+    // Initial synchronous registration uses baseline/cached models
+    assert.equal(cline.id, "cline");
+    assert.equal(clinePass.id, "cline-pass");
+    assert.equal(cline.getModels().length, 1);
+    assert.equal(clinePass.getModels().length, 13);
 
-    // Wait for background disk cache update
-    const updated = await backgroundRefresh;
-    assert.equal(updated, true);
+    // Dynamic refresh via refreshModels / fetchModels updates models in-place
+    const mockPublish = async (pub: { update?: () => void }) => {
+      pub.update?.();
+      return true;
+    };
 
-    // Session providers are not re-registered or mutated
-    assert.equal(providers.length, 2);
+    await cline.refreshModels!({
+      allowNetwork: true,
+      publish: mockPublish,
+      signal: new AbortController().signal,
+    });
+    await clinePass.refreshModels!({
+      allowNetwork: true,
+      publish: mockPublish,
+      signal: new AbortController().signal,
+    });
 
-    // User is notified to reload when the catalog differs from the initial models
-    assert.equal(notifications.length, 1);
-    assert.ok(notifications[0].includes("Run /reload"));
-
-    // Disk cache is updated for subsequent sessions
-    const cached = getFallbackModelGroups(agentDir);
-    assert.equal(cached.cline.length, 2);
-    assert.equal(cached.clinePass.length, 2);
-
-    // Subsequent start with matching cache does not notify
-    const secondNotifications: string[] = [];
-    const secondRefresh = registerClineProviders(
-      { registerProvider: () => {} },
-      fakeFetch,
-      agentDir,
-      (msg) => secondNotifications.push(msg),
-    );
-    const secondUpdated = await secondRefresh;
-    assert.equal(secondUpdated, false);
-    assert.equal(secondNotifications.length, 0);
+    assert.ok(cline.getModels().some((m) => m.id === "anthropic/claude-test"));
+    assert.ok(cline.getModels().some((m) => m.id === "z-ai/glm-5.3"));
+    assert.ok(clinePass.getModels().some((m) => m.id === "cline-pass/glm-5.3"));
   } finally {
     rmSync(agentDir, { recursive: true, force: true });
   }
@@ -128,7 +116,7 @@ test("allows baseUrl overwrite from models.json for cline and cline-pass", async
     });
     const registry = new ModelRegistry(runtime);
 
-    await registerClineProviders(registry, fakeFetch, agentDir);
+    registerClineProviders(registry, fakeFetch, agentDir);
 
     const clineProvider = runtime.getProvider("cline");
     const clinePassProvider = runtime.getProvider("cline-pass");
@@ -139,6 +127,76 @@ test("allows baseUrl overwrite from models.json for cline and cline-pass", async
     assert.equal(clinePassProvider?.baseUrl, "http://localhost:8789");
     assert.equal(clineModels[0]?.baseUrl, "http://localhost:8789");
     assert.equal(clinePassModels[0]?.baseUrl, "http://localhost:8789");
+  } finally {
+    rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("preserves route-marker baseUrl wrapping across dynamic model refreshes", async () => {
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-cline-route-marker-"));
+  try {
+    const modelsJsonPath = join(agentDir, "models.json");
+    writeFileSync(
+      modelsJsonPath,
+      JSON.stringify({
+        providers: {
+          cline: {
+            baseUrl: "http://localhost:8788",
+            routeMarker: "route_to",
+          },
+        },
+      }),
+    );
+
+    process.env.CLINE_API_KEY = "dummy-key";
+
+    const runtime = await ModelRuntime.create({
+      modelsPath: modelsJsonPath,
+      authPath: join(agentDir, "auth.json"),
+    });
+    const registry = new ModelRegistry(runtime);
+
+    // Initial registration
+    registerClineProviders(registry, fakeFetch, agentDir);
+
+    // Simulate route-marker wrapping on session_start
+    const native = registry.getRegisteredNativeProvider("cline")!;
+    const routedBaseUrl = "http://localhost:8788/route_to/https://api.cline.bot/api/v1";
+    const routedProvider: Provider = {
+      ...native,
+      baseUrl: routedBaseUrl,
+      auth: {
+        apiKey: {
+          ...native.auth.apiKey!,
+          async resolve(input) {
+            const res = await native.auth.apiKey!.resolve(input);
+            return res ? { ...res, auth: { ...res.auth, baseUrl: routedBaseUrl } } : undefined;
+          },
+        },
+      },
+    };
+    registry.registerProvider(routedProvider);
+
+    // Verify routed auth before refresh
+    const authBefore = await runtime.getAuth("cline");
+    assert.equal(authBefore?.auth?.baseUrl, routedBaseUrl);
+
+    // Non-blocking model refresh runs
+    const cline = registry.getRegisteredNativeProvider("cline")!;
+    const mockPublish = async (pub: { update?: () => void }) => {
+      pub.update?.();
+      return true;
+    };
+    await cline.refreshModels!({
+      allowNetwork: true,
+      publish: mockPublish,
+      signal: new AbortController().signal,
+    });
+
+    // Verify routed auth is preserved after refresh and live models are present
+    const authAfter = await runtime.getAuth("cline");
+    assert.equal(authAfter?.auth?.baseUrl, routedBaseUrl);
+    assert.ok(runtime.getModels("cline").some((m) => m.id === "anthropic/claude-test"));
   } finally {
     rmSync(agentDir, { recursive: true, force: true });
   }

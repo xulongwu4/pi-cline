@@ -173,10 +173,12 @@ export function getFallbackModelGroups(agentDir = getAgentDir()): ModelGroups {
   };
 }
 
-async function getJson<T>(fetcher: typeof fetch, url: string): Promise<T> {
+async function getJson<T>(fetcher: typeof fetch, url: string, signal?: AbortSignal): Promise<T> {
+  const timeoutSignal = AbortSignal.timeout(CATALOG_TIMEOUT_MS);
+  const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
   const response = await fetcher(url, {
     headers: { Accept: "application/json" },
-    signal: AbortSignal.timeout(CATALOG_TIMEOUT_MS),
+    signal: combinedSignal,
   });
   if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
   return (await response.json()) as T;
@@ -185,12 +187,13 @@ async function getJson<T>(fetcher: typeof fetch, url: string): Promise<T> {
 export async function refreshModelCatalog(
   fetcher: typeof fetch = fetch,
   agentDir = getAgentDir(),
+  signal?: AbortSignal,
 ): Promise<ModelGroups | undefined> {
   const fallback = getFallbackModelGroups(agentDir);
   try {
     const [catalogResult, recommendedResult] = await Promise.allSettled([
-      getJson<{ data?: CatalogEntry[] }>(fetcher, MODELS_URL),
-      getJson<RecommendedPayload>(fetcher, RECOMMENDED_URL),
+      getJson<{ data?: CatalogEntry[] }>(fetcher, MODELS_URL, signal),
+      getJson<RecommendedPayload>(fetcher, RECOMMENDED_URL, signal),
     ]);
     const catalog =
       catalogResult.status === "fulfilled"
@@ -259,7 +262,8 @@ export function modelGroupsEqual(a: ModelGroups, b: ModelGroups): boolean {
 export async function loadModelGroups(
   fetcher: typeof fetch = fetch,
   agentDir = getAgentDir(),
+  signal?: AbortSignal,
 ): Promise<ModelGroups> {
-  const updated = await refreshModelCatalog(fetcher, agentDir);
+  const updated = await refreshModelCatalog(fetcher, agentDir, signal);
   return updated ?? getFallbackModelGroups(agentDir);
 }
